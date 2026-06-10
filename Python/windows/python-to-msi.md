@@ -86,7 +86,8 @@ Expected output (two common layouts):
   - `dist\MyApp\MyApp.exe`
   - dependency files next to the EXE (no `_internal` folder)
 
-<!-- TODO: add screenshot: ../../images/windows/dist-folder-msi.png -->
+![PowerShell open in project folder](../../images/windows/dist-folder-msi.png)
+![PowerShell open in project folder](../../images/windows/dist-folder-msi-2.png)
 
 ## Step 2: Create a WiX project folder
 
@@ -104,17 +105,17 @@ Add `HarvestedFiles.wxs` to your `.gitignore` — it is regenerated on every bui
 
 Open PowerShell and run:
 
-<!-- Generates a new random GUID — run this 3 to 5 times and save the results -->
+<!-- Generates a new random GUID — run  and save the result -->
 ```powershell
 [guid]::NewGuid()
 ```
 
-Generate 3 to 5 GUIDs and save them somewhere handy. You will use them for:
+Generate a GUID and save them somewhere handy. You will use them for:
 
 - `UpgradeCode` (stable across releases — never change this)
-- Component GUIDs (unique per component)
 
-<!-- TODO: add screenshot: ../../images/windows/powershell-guids.png -->
+
+![PowerShell open in project folder](../../images/windows/powershell-guids.png)
 
 ## Step 4: Create the main WiX file
 
@@ -125,32 +126,41 @@ Create `installer.wxs` and paste this template:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*" Name="MyApp" Language="1033" Version="1.0.0" Manufacturer="YourCompany" UpgradeCode="YOUR-UPGRADE-CODE-GUID">
+  <Product Id="*" Name="MyApp" Language="1033" Version="DEPLOY_VERSION_TOKEN" Manufacturer="Your company Name" UpgradeCode="YOUR-UPGRADE-CODE-GUID">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
-    <MediaTemplate />
+    <MediaTemplate EmbedCab="yes" />
 
     <!-- MajorUpgrade handles uninstalling old versions automatically on upgrade.
          Without this element, installing a new version leaves the old one behind. -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of MyApp is already installed." />
 
-    <Icon Id="AppIcon" SourceFile="packaging\\app.ico" />
+    <Icon Id="AppIcon" SourceFile="packaging\\your_app_icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <!-- ProgramFiles64Folder ensures install goes to C:\Program Files
-           and not C:\Program Files (x86) for 64-bit apps.
-           For 32-bit apps, change this back to ProgramFilesFolder. -->
+           and not C:\Program Files (x86) for 64-bit apps -->
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLDIR" Name="MyApp">
-          <Component Id="MainExecutable" Guid="YOUR-MAIN-EXECUTABLE-GUID">
-            <File Id="AppExe" Source="dist\MyApp\MyApp.exe" KeyPath="yes" />
+          <Component Id="MainExecutable" Guid="*"> <!-- "*" auto generates the Guid-->
+            <File Id="AppExe" Source="dist\app\app.exe" KeyPath="yes" />
           </Component>
+
+          <!-- INTERNALDIRREF maps to the _internal subfolder.
+               PyInstaller >= 6 puts all dependencies here.
+               heat uses -dr INTERNALDIRREF so deps install into
+               _internal, matching the exact runtime layout PyInstaller
+               expects. Without this the app crashes on launch because
+               the bootloader cannot find python312.dll and other deps. -->
+          <Directory Id="INTERNALDIRREF" Name="_internal" />
+
         </Directory>
       </Directory>
+
       <Directory Id="ProgramMenuFolder">
         <Directory Id="StartMenuFolder" Name="MyApp">
-          <Component Id="StartMenuShortcut" Guid="YOUR-STARTMENU-SHORTCUT-GUID">
-            <Shortcut Id="StartMenuShortcut" Name="MyApp" Description="Launch MyApp" Target="[INSTALLDIR]MyApp.exe" WorkingDirectory="INSTALLDIR" Advertise="no" />
+          <Component Id="StartMenuShortcut" Guid="*"> <!-- "*" auto generates the Guid-->
+            <Shortcut Id="StartMenuShortcut" Name="MyApp" Description="Launch MyApp" Target="[INSTALLDIR]app.exe" WorkingDirectory="INSTALLDIR" Advertise="no" />
             <!-- RemoveFolder on a custom StartMenu subfolder is correct and required
                  so the subfolder is cleaned up on uninstall -->
             <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
@@ -158,12 +168,13 @@ Create `installer.wxs` and paste this template:
           </Component>
         </Directory>
       </Directory>
+
       <Directory Id="DesktopFolder">
         <!-- Note: RemoveFolder is intentionally absent here.
              DesktopFolder is a standard system folder — never remove it on uninstall.
              Including RemoveFolder on DesktopFolder causes ICE64 validation errors. -->
-        <Component Id="DesktopShortcut" Guid="YOUR-DESKTOP-SHORTCUT-GUID">
-          <Shortcut Id="DesktopShortcut" Name="MyApp" Description="Launch MyApp from Desktop" Target="[INSTALLDIR]MyApp.exe" WorkingDirectory="INSTALLDIR" Advertise="no" Icon="AppIcon" />
+        <Component Id="DesktopShortcut" Guid="*"> <!-- "*" auto generates the Guid-->
+          <Shortcut Id="DesktopShortcut" Name="MyApp" Description="Launch MyApp from Desktop" Target="[INSTALLDIR]app.exe" WorkingDirectory="INSTALLDIR" Advertise="no" Icon="AppIcon" />
           <RegistryValue Root="HKCU" Key="Software\MyApp" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
         </Component>
       </Directory>
@@ -173,6 +184,8 @@ Create `installer.wxs` and paste this template:
       <ComponentRef Id="MainExecutable" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+      <!-- InternalComponentGroup is generated by heat and contains all
+           _internal dependencies installed into the _internal subfolder -->
       <ComponentGroupRef Id="InternalComponentGroup" />
     </Feature>
 
@@ -187,7 +200,7 @@ Create `installer.wxs` and paste this template:
 
 > **Why MajorUpgrade:** Without the `MajorUpgrade` element, installing a new version of your MSI will not remove the old one. Users end up with two entries in Add/Remove Programs. The `MajorUpgrade` element tells Windows Installer to uninstall the old version automatically before installing the new one.
 
-<!-- TODO: add screenshot: ../../images/windows/installer-wxs-editor.png -->
+![PowerShell open in project folder](../../images/windows/installer-wxs-editor.png)
 
 ## Step 5: Harvest the dependency folder
 
@@ -263,7 +276,7 @@ Expected output: `MyApp.msi` appears in the current directory.
 >
 > **Why `-dSourceDir`:** The `heat` step emits `$(var.SourceDir)\filename` as file paths. The `-dSourceDir` switch tells `candle` what value to substitute for `var.SourceDir` so it can locate the actual files.
 
-<!-- TODO: add screenshot: ../../images/windows/msi-created.png -->
+![PowerShell open in project folder](../../images/windows/msi-created.png)
 
 ## Step 7: Install and verify
 
@@ -272,7 +285,9 @@ Expected output: `MyApp.msi` appears in the current directory.
 3. Check Start Menu and Desktop shortcuts.
 4. Confirm the app launches correctly.
 
-<!-- TODO: add screenshot: ../../images/windows/msi-install-wizard.png -->
+![PowerShell open in project folder](../../images/windows/msi-wizard (1).png)
+![PowerShell open in project folder](../../images/windows/msi-wizard (2).png)
+![PowerShell open in project folder](../../images/windows/msi-wizard (3).png)
 
 ## Step 8: Log installations (recommended)
 
